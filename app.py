@@ -606,8 +606,10 @@ if uploaded_file is not None:
                 try:
                     qa_chain = build_qa_chain(vector_store, hf_token)
                     st.session_state["qa_chain"] = qa_chain
+                    st.session_state["llm_error"] = None
                 except Exception as e:
-                    st.warning(f"⚠️ LLM chain failed to init: {e}. Falling back to retrieval-only mode.")
+                    st.session_state["llm_error"] = str(e)
+                    st.warning(f"⚠️ LLM init failed: {e}")
 
             st.session_state.update({
                 "vector_store": vector_store,
@@ -702,19 +704,17 @@ if st.session_state["vector_store"] is not None:
 
     # ── Input ──
     prefill = st.session_state.pop("_prefill", "")
-    user_q = st.text_input(
-        "Ask anything about your document",
-        value=prefill,
-        placeholder="e.g. What are the main conclusions?",
-        label_visibility="collapsed",
-        key="chat_input",
-    )
 
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        ask_clicked = st.button("⚡ Ask", use_container_width=True)
+    with st.form(key="chat_form", clear_on_submit=True):
+        user_q = st.text_input(
+            "Ask anything about your document",
+            value=prefill,
+            placeholder="e.g. What are the main conclusions?",
+            label_visibility="collapsed",
+        )
+        ask_clicked = st.form_submit_button("⚡ Ask", use_container_width=False)
 
-    if (ask_clicked or user_q) and user_q.strip():
+    if ask_clicked and user_q.strip():
         question = user_q.strip()
 
         with st.spinner("🧠 Thinking..."):
@@ -730,12 +730,16 @@ if st.session_state["vector_store"] is not None:
                     answer = result.get("result", "").strip()
                     if not answer or answer.lower().startswith("i couldn"):
                         answer = None
-                except Exception:
-                    answer = None
+                except Exception as e:
+                    answer = f"<em style='color:#ef4444;font-size:0.8rem;'>⚠️ LLM error: {e}</em>"
 
             if not answer:
-                # Fallback: return the best matching chunk, clearly labeled
-                answer = f"<em style='color:#64748b;font-size:0.8rem;'>[Retrieval-only mode — add HF token for LLM answers]</em><br><br>{docs[0].page_content if docs else 'No relevant content found.'}"
+                err = st.session_state.get("llm_error")
+                if err:
+                    fallback_label = f"<em style='color:#ef4444;font-size:0.8rem;'>⚠️ LLM failed: {err[:120]}...</em><br><br>"
+                else:
+                    fallback_label = "<em style='color:#64748b;font-size:0.8rem;'>[Retrieval-only — add HF token for LLM answers]</em><br><br>"
+                answer = fallback_label + (docs[0].page_content if docs else "No relevant content found.")
 
         # Store in history
         st.session_state["chat_history"].append({"role": "user", "content": question})
