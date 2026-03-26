@@ -10,7 +10,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
-from langchain_community.llms import HuggingFaceHub
+from langchain_huggingface import HuggingFaceEndpoint
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
@@ -430,9 +430,9 @@ def build_qa_chain(vector_store, hf_token):
     """Build a RetrievalQA chain with a proper prompt template."""
     custom_prompt = PromptTemplate(
         input_variables=["context", "question"],
-        template="""You are DocMind, an expert document analyst. Answer the question using ONLY the context below.
+        template="""You are DocMind, an expert document analyst. Answer the question clearly and helpfully using ONLY the context below.
 If the answer is not in the context, say: "I couldn't find that in the document."
-Be concise, factual, and cite the relevant part when useful.
+Be concise, specific, and structured. Use bullet points when listing multiple items.
 
 Context:
 {context}
@@ -442,14 +442,15 @@ Question: {question}
 Answer:""",
     )
 
-    llm = HuggingFaceHub(
+    llm = HuggingFaceEndpoint(
         repo_id="google/flan-t5-large",
         huggingfacehub_api_token=hf_token,
-        model_kwargs={"temperature": 0.3, "max_new_tokens": 512},
+        temperature=0.3,
+        max_new_tokens=512,
     )
 
     retriever = vector_store.as_retriever(
-        search_type="mmr",          # Maximal Marginal Relevance for diversity
+        search_type="mmr",
         search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.6},
     )
 
@@ -676,10 +677,23 @@ if st.session_state["vector_store"] is not None:
             else:
                 conf = msg.get("confidence", 0)
                 conf_color = "#10b981" if conf > 60 else "#f59e0b" if conf > 35 else "#ef4444"
+                # Format answer: convert newlines and bullet points to HTML
+                raw = msg['content']
+                formatted = (raw
+                    .replace("&", "&amp;")
+                    .replace("<em", "[[EM]]").replace("</em>", "[[/EM]]")
+                    .replace("<", "&lt;").replace(">", "&gt;")
+                    .replace("[[EM]]", "<em").replace("[[/EM]]", "</em>")
+                    .replace("\n• ", "<br>• ")
+                    .replace("\n- ", "<br>• ")
+                    .replace("\n* ", "<br>• ")
+                    .replace("\n\n", "<br><br>")
+                    .replace("\n", "<br>")
+                )
                 st.markdown(f"""
                 <div class="bubble-ai">
                     <div class="label">🧠 DocMind</div>
-                    {msg['content']}
+                    <div style="line-height:1.7;">{formatted}</div>
                     <div class="conf-wrap">
                         <div class="conf-label">RELEVANCE CONFIDENCE</div>
                         <div class="conf-bar-bg">
